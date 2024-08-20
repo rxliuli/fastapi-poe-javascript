@@ -12,6 +12,7 @@ import { streamSSE } from 'hono/streaming'
 
 interface Bot {
   handler: Handler
+  set accessKey(value: string)
 
   syncBotSettings(): Promise<void>
   streamRequest(
@@ -22,7 +23,6 @@ interface Bot {
 
 interface Options {
   name: string
-  key: string
 
   getResponse(request: QueryRequest): AsyncGenerator<PartialResponse>
   getSettings(
@@ -30,16 +30,6 @@ interface Options {
   ): SettingsResponse | Promise<SettingsResponse>
   onFeedback?(request: ReportFeedbackRequest): Promise<void>
   onError?(request: ReportErrorRequest): Promise<void>
-}
-
-function authenticate(key: string): MiddlewareHandler {
-  return async (c, next) => {
-    const authHeader = c.req.header().authorization
-    if (authHeader !== `Bearer ${key}`) {
-      return c.text('Unauthorized', 401)
-    }
-    await next()
-  }
 }
 
 const PROTOCOL_VERSION = '1.0' // Assuming this is defined elsewhere
@@ -145,7 +135,7 @@ export function streamSSETransformStream() {
         buffer = ''
       }
     },
-    flush(controller: TransformStreamDefaultController) {
+    flush() {
       if (buffer.trim()) {
         console.warn('Unprocessed data in buffer:', buffer)
       }
@@ -196,24 +186,6 @@ async function* streamRequest(
   }
 }
 
-function serialize(
-  value:
-    | {
-        event: 'meta'
-        data: MetaResponse
-      }
-    | {
-        event: 'text'
-        data: PartialResponse
-      }
-    | {
-        event: 'done'
-        data: {}
-      },
-): string {
-  return `event: ${value.event}\ndata: ${JSON.stringify(value.data)}\n\n`
-}
-
 type RequestBody =
   | {
       version: string
@@ -231,7 +203,14 @@ type RequestBody =
     )
 
 export function poe(options: Options): Bot {
+  let key = ''
   const handler: Handler = async (c) => {
+    if (!key) {
+      key = c.env.ACCESS_KEY
+    }
+    if (!key) {
+      throw new Error('Access Key is required')
+    }
     function handleQuery(query: QueryRequest) {
       return streamSSE(c, async (stream) => {
         await stream.writeSSE({
@@ -253,7 +232,7 @@ export function poe(options: Options): Bot {
       })
     }
     const authHeader = c.req.header().authorization
-    if (authHeader !== `Bearer ${options.key}`) {
+    if (authHeader !== `Bearer ${key}`) {
       return c.text('Unauthorized', 401)
     }
     const body = (await c.req.json()) as RequestBody
@@ -272,13 +251,15 @@ export function poe(options: Options): Bot {
         return c.text('501 Not Implemented', 501)
     }
   }
-  if (!options.name || !options.key) {
+  if (!options.name) {
     throw new Error('name and key are required')
   }
   return {
     handler,
-    syncBotSettings: () => syncBotSettings(options.name, options.key),
-    streamRequest: (request, botName) =>
-      streamRequest(request, botName, options.key),
+    set accessKey(value: string) {
+      key = value
+    },
+    syncBotSettings: () => syncBotSettings(options.name, key),
+    streamRequest: (request, botName) => streamRequest(request, botName, key),
   }
 }

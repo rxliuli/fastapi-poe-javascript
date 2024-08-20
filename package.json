@@ -1,6 +1,6 @@
 {
   "name": "fastapi-poe",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "type": "module",
   "bin": {
     "poe": "./bin.js"
@@ -15,6 +15,7 @@
     "url": "https://github.com/rxliuli/fastapi-poe-javascript",
     "type": "git"
   },
+  "license": "MIT",
   "files": [
     "dist",
     "packages",

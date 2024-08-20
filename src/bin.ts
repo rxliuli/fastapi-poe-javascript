@@ -31,8 +31,16 @@ new Command()
       console.log('\n✨ PoeAI server bot project create success!\n')
       console.log('Next steps:')
       console.log(`  1. ${chalk.blue(`cd ${name}`)}`)
-      console.log(`  2. ${chalk.blue('pnpm install')}`)
+      console.log(`  2. ${chalk.blue('pnpm i')}`)
       console.log(`  3. ${chalk.blue('pnpm dev')}`)
+      console.log(`  4. ${chalk.blue('pnpm run deploy')}`)
+      console.log(
+        `  5. ${chalk.blue(
+          `echo ${chalk.bgRed(
+            accessKey,
+          )} | pnpm wrangler secret put ACCESS_KEY`,
+        )}`,
+      )
     }),
   )
   .version(version)
