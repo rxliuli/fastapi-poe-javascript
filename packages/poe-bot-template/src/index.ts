@@ -4,14 +4,14 @@ import { poe } from 'fastapi-poe'
 const app = new Hono()
 
 interface Env {
-  API_KEY: string
+  ACCESS_KEY: string
 }
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const bot = poe({
       name: 'poe-bot-template',
-      key: env.API_KEY,
+      key: env.ACCESS_KEY,
       getSettings() {
         return {
           server_bot_dependencies: {
