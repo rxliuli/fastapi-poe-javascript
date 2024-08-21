@@ -26,25 +26,25 @@ echo <access-key> | pnpm wrangler secret put ACCESS_KEY
 ## Basic Usage
 
 ```ts
+import { Hono } from 'hono'
 import { poe } from 'fastapi-poe'
 
+const app = new Hono()
+
+interface Env {
+  ACCESS_KEY: string
+}
+
 const bot = poe({
-  name: 'custom-bot',
-  // settings, https://creator.poe.com/docs/poe-protocol-specification#settings
+  name: 'poe-bot-template',
   getSettings() {
     return {
-      // declare other bots as dependencies
       server_bot_dependencies: {
         'Claude-3.5-Sonnet': 1,
       },
-      allow_attachments: false,
-      suggested_replies: true,
-      enable_markdown: true,
     }
   },
-  // get response from bot, https://creator.poe.com/docs/poe-protocol-specification#query
   async *getResponse(req) {
-    // call other bots
     for await (const response of bot.streamRequest(req, 'Claude-3.5-Sonnet')) {
       yield {
         text: response.text,
@@ -52,4 +52,14 @@ const bot = poe({
     }
   },
 })
+
+app.post('/', bot.handler)
+app.get('/', async (c) => c.text('Hello Hono!'))
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    bot.accessKey = env.ACCESS_KEY
+    return app.fetch(request, env, ctx)
+  },
+}
 ```
