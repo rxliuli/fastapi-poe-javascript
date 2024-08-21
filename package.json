@@ -1,6 +1,6 @@
 {
   "name": "fastapi-poe",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "bin": {
     "poe": "./bin.js"
