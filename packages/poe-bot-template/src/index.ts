@@ -14,9 +14,6 @@ const bot = poe({
       server_bot_dependencies: {
         'Claude-3.5-Sonnet': 1,
       },
-      allow_attachments: false,
-      suggested_replies: true,
-      enable_markdown: true,
     }
   },
   async *getResponse(req) {

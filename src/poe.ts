@@ -1,6 +1,5 @@
-import { Handler, MiddlewareHandler } from 'hono'
+import { Context, Handler } from 'hono'
 import {
-  MetaResponse,
   PartialResponse,
   QueryRequest,
   ReportErrorRequest,
@@ -101,38 +100,60 @@ export function parseSSEMessage(message: string): ParsedDone | ParsedText {
   return { event, data } as ParsedDone | ParsedText
 }
 
-export function streamSSETransformStream() {
+export function sseTransformStream() {
   let buffer = ''
   return new TransformStream<
     string,
     {
-      event: 'text' | 'done'
+      event: 'text'
       data: any
     }
   >({
     transform(chunk: string, controller: TransformStreamDefaultController) {
-      // console.log('chunk:', chunk)
-      buffer += chunk.trim()
-
-      if (buffer.endsWith('"}') || buffer.endsWith('{}')) {
-        const eventMatch = buffer.match(/event:\s*(\w+)/)
-        const dataMatch = buffer.match(/data:\s*({.*})/)
-
-        if (eventMatch && dataMatch) {
-          const event = eventMatch[1]
-          const data = dataMatch[1]
-
-          if (event === 'text' && data !== '{}') {
+      buffer += chunk
+      const textRegexp = /^event: text[\r\n]+data: ({[\s\S]*?})/
+      const doneRegexp = /^event: done[\r\n]+data: ({})/
+      while (buffer) {
+        // console.log(
+        //   !/^ping$/m.test(buffer) &&
+        //     !doneRegexp.test(buffer) &&
+        //     !textRegexp.test(buffer) &&
+        //     buffer !== '' &&
+        //     buffer !== 'event: text\r\ndata: {"text": ' &&
+        //     buffer.trim() !== ': ping',
+        // )
+        buffer = buffer.trimStart()
+        if (textRegexp.test(buffer)) {
+          const match = buffer.match(textRegexp)
+          if (match) {
             controller.enqueue({
-              event,
-              data: JSON.parse(data),
+              event: 'text',
+              data: JSON.parse(match[1]),
             })
-          } else if (event === 'done') {
+            buffer = buffer.replace(match[0], '').trimStart()
+          }
+        } else if (doneRegexp.test(buffer)) {
+          const match = buffer.match(doneRegexp)
+          if (match) {
+            // controller.enqueue({
+            //   event: 'done',
+            //   data: JSON.parse(match[1]),
+            // })
+            buffer = buffer.replace(match[0], '').trimStart()
             controller.terminate()
             return
           }
+          // ignore ping
+        } else if (/^ping$/m.test(buffer)) {
+          const match = buffer.match(/^ping$/m)
+          if (match) {
+            buffer = buffer.replace(match[0], '').trimStart()
+          }
+        } else if (buffer.trim() === ': ping') {
+          buffer = buffer.replace(': ping', '').trimStart()
+        } else {
+          return
         }
-        buffer = ''
       }
     },
     flush() {
@@ -146,16 +167,13 @@ export function streamSSETransformStream() {
 async function* streamRequest(
   request: QueryRequest,
   botName: string,
-  apiKey: string,
+  accessKey: string,
 ): AsyncGenerator<BotMessage> {
-  const baseUrl = 'https://api.poe.com/bot/'
-  const url = `${baseUrl}${botName}`
-  // 首先发送初始化请求
-  const response = await fetch(url, {
+  const response = await fetch(`https://api.poe.com/bot/${botName}`, {
     method: 'post',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${accessKey}`,
       Accept: 'text/event-stream',
       'Cache-Control': 'no-cache',
     },
@@ -166,7 +184,7 @@ async function* streamRequest(
   }
   const reader = response
     .body!.pipeThrough(new TextDecoderStream())
-    .pipeThrough(streamSSETransformStream())
+    .pipeThrough(sseTransformStream())
     .getReader()
   let chunk = await reader.read()
   while (!chunk.done) {
@@ -203,49 +221,47 @@ type RequestBody =
     )
 
 export function poe(options: Options): Bot {
+  function handleQuery(query: QueryRequest, c: Context) {
+    return streamSSE(c, async (stream) => {
+      await stream.writeSSE({
+        event: 'meta',
+        data: JSON.stringify({ content_type: 'text/markdown' }),
+      })
+      const list = options.getResponse(query)
+      for await (const it of list) {
+        if (it.is_replace_response) {
+          stream.writeSSE({
+            event: 'replace_response',
+            data: JSON.stringify(it),
+          })
+        } else {
+          stream.writeSSE({ event: 'text', data: JSON.stringify(it) })
+        }
+      }
+      stream.writeSSE({ event: 'done', data: JSON.stringify({}) })
+    })
+  }
+
   let key = ''
   const handler: Handler = async (c) => {
     if (!key) {
-      key = c.env.ACCESS_KEY
-    }
-    if (!key) {
       throw new Error('Access Key is required')
-    }
-    function handleQuery(query: QueryRequest) {
-      return streamSSE(c, async (stream) => {
-        await stream.writeSSE({
-          event: 'meta',
-          data: JSON.stringify({ content_type: 'text/markdown' }),
-        })
-        const list = options.getResponse(query)
-        for await (const it of list) {
-          if (it.is_replace_response) {
-            stream.writeSSE({
-              event: 'replace_response',
-              data: JSON.stringify(it),
-            })
-          } else {
-            stream.writeSSE({ event: 'text', data: JSON.stringify(it) })
-          }
-        }
-        stream.writeSSE({ event: 'done', data: JSON.stringify({}) })
-      })
     }
     const authHeader = c.req.header().authorization
     if (authHeader !== `Bearer ${key}`) {
       return c.text('Unauthorized', 401)
     }
-    const body = (await c.req.json()) as RequestBody
-    switch (body.type) {
+    const req = (await c.req.json()) as RequestBody
+    switch (req.type) {
       case 'query':
-        return handleQuery(body)
+        return handleQuery(req, c)
       case 'settings':
-        return c.json(await options.getSettings(body))
+        return c.json(await options.getSettings(req))
       case 'report_feedback':
-        await options.onFeedback?.(body)
+        await options.onFeedback?.(req)
         return c.json({})
       case 'report_error':
-        await options.onError?.(body)
+        await options.onError?.(req)
         return c.json({})
       default:
         return c.text('501 Not Implemented', 501)

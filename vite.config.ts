@@ -9,4 +9,8 @@ export default defineConfig({
       dts: true,
     }),
   ],
+  build: {
+    sourcemap: true,
+    minify: false,
+  },
 })

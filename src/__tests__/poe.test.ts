@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { streamSSETransformStream } from '../poe'
+import { sseTransformStream } from '../poe'
 
-describe('streamSSETransformStream', () => {
+describe('sseTransformStream', () => {
   function arrayToReadableStream(array: string[]): ReadableStream<Uint8Array> {
     return new ReadableStream({
       start(controller) {
@@ -17,7 +17,7 @@ describe('streamSSETransformStream', () => {
     const stream = arrayToReadableStream(input)
     return stream
       .pipeThrough(new TextDecoderStream())
-      .pipeThrough(streamSSETransformStream())
+      .pipeThrough(sseTransformStream())
       .getReader()
   }
 
@@ -31,11 +31,10 @@ describe('streamSSETransformStream', () => {
     })
     const reader = stream
       .pipeThrough(new TextDecoderStream())
-      .pipeThrough(streamSSETransformStream())
+      .pipeThrough(sseTransformStream())
       .getReader()
 
     const result = await reader.read()
-    console.log('result:', result.value)
     expect(result.value).deep.eq({ event: 'text', data: { text: 'Hello' } })
     expect(result.done).false
 
@@ -48,16 +47,7 @@ describe('streamSSETransformStream', () => {
       event: done\ndata: {}\n\n
       event: text\ndata: {"text":"This should not be processed"}\n\n
     `
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode(input))
-        controller.close()
-      },
-    })
-    const reader = stream
-      .pipeThrough(new TextDecoderStream())
-      .pipeThrough(streamSSETransformStream())
-      .getReader()
+    const reader = createReadStream([input])
 
     const result = await reader.read()
     expect(result.value).deep.eq({ event: 'text', data: { text: 'Hello' } })
@@ -93,7 +83,7 @@ describe('streamSSETransformStream', () => {
     const end = await reader.read()
     expect(end.done).true
   })
-  it('真实数据', async () => {
+  it('Claude 3.5 Sonnet 的响应', async () => {
     const list = [
       `event: text\ndata: {"text":`,
       `"Hello"}`,
@@ -160,6 +150,99 @@ describe('streamSSETransformStream', () => {
       { event: 'text', data: { text: ' feel' } },
       { event: 'text', data: { text: ' free to ask me anything' } },
       { event: 'text', data: { text: " you'd like." } },
+      { event: 'text', data: { text: '' } },
+    ])
+  })
+  it('GPT-4o 的响应', async () => {
+    const reader = createReadStream([
+      `event: text
+data: {"text": `,
+      `""}
+
+event: text
+data: {"text": "Hello"}`,
+      `event: text
+data: {"text":`,
+      `"!"}
+
+event: text
+data: {"text": " How"}`,
+      `event: text
+data: {"text":`,
+      `" can"}
+
+event: text
+data: {"text": " I"}`,
+      `event: text
+data: {"text":`,
+      `" assist"}
+
+event: text
+data: {"text": " you"}`,
+      `event: text
+data: {"text":`,
+      `" today"}
+
+event: text
+data: {"text": "?"}`,
+      `event: text
+data: {"text": `,
+      `""}`,
+      `event: done
+data: {}`,
+    ])
+
+    const result: { event: string; data: any }[] = []
+    let chunk = await reader.read()
+    while (!chunk.done) {
+      result.push(chunk.value)
+      chunk = await reader.read()
+    }
+    expect(result).deep.eq([
+      { event: 'text', data: { text: '' } },
+      { event: 'text', data: { text: 'Hello' } },
+      { event: 'text', data: { text: '!' } },
+      { event: 'text', data: { text: ' How' } },
+      { event: 'text', data: { text: ' can' } },
+      { event: 'text', data: { text: ' I' } },
+      { event: 'text', data: { text: ' assist' } },
+      { event: 'text', data: { text: ' you' } },
+      { event: 'text', data: { text: ' today' } },
+      { event: 'text', data: { text: '?' } },
+      { event: 'text', data: { text: '' } },
+    ])
+  })
+  it('GPT-4o 的错误响应', async () => {
+    const input =
+      'event: text\r\ndata: {"text":""}\r\n\r\nevent: text\r\ndata: {"text": "Hello"}'
+    const reader = createReadStream([input])
+
+    const result: { event: string; data: any }[] = []
+    let chunk = await reader.read()
+    while (!chunk.done) {
+      result.push(chunk.value)
+      chunk = await reader.read()
+    }
+    expect(result).deep.eq([
+      { event: 'text', data: { text: '' } },
+      { event: 'text', data: { text: 'Hello' } },
+    ])
+  })
+  it('Claude 3.5 Sonnet 响应的 ping', async () => {
+    const reader = createReadStream([
+      'event: text\ndata: {"text":""}\n\n',
+      ': ping\r\n\r\n',
+      'event: text\ndata: {"text":""}\n\n',
+    ])
+
+    const result: { event: string; data: any }[] = []
+    let chunk = await reader.read()
+    while (!chunk.done) {
+      result.push(chunk.value)
+      chunk = await reader.read()
+    }
+    expect(result).deep.eq([
+      { event: 'text', data: { text: '' } },
       { event: 'text', data: { text: '' } },
     ])
   })
